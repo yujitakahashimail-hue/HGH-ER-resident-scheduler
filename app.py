@@ -997,7 +997,7 @@ with st.form("prefs_save_form", clear_on_submit=False):
         df["priority"] = df["priority"].astype(str).str.strip().str.upper()
         bad_mask = (df["priority"] == "A") & (df["kind"].isin(["day", "icu"]))
         df.loc[bad_mask, "priority"] = "B"
-        df = df[df["kind"].isin(["off", "early", "late", "day", "day1", "day2", "icu"])]
+        df = df[df["kind"].isin(["off", "early", "late", "day", "day1", "day2", "icu", "vacation"])]
         df = df[df["name"].isin(names)]
         df = df.drop_duplicates(subset=["date", "name", "kind", "priority"], keep="last").reset_index(drop=True)
 
@@ -1224,10 +1224,8 @@ def build_and_solve(fair_slack: int, disabled_pref_ids: set, weaken_day2_bonus: 
     model = cp_model.CpModel()
     x = {(d, s, i): model.NewBoolVar(f"x_d{d}_s{s}_i{i}") for d in range(D) for s in range(len(SHIFTS)) for i in range(N)}
 
-    for d in range(D):
-        for i in range(N):
-            if (d, i) not in allow_vac:
-                model.Add(x[(d, VAC_IDX, i)] == 0)
+    VAC_IDX = SHIFTS.index("VAC")
+    ICU_IDX = SHIFTS.index("ICU")
 
     for d in range(D):
         for i in range(N):
@@ -1309,14 +1307,48 @@ def build_and_solve(fair_slack: int, disabled_pref_ids: set, weaken_day2_bonus: 
     prefs_eff["kind"] = prefs_eff["kind"].astype(str).str.strip().str.lower()
     prefs_eff["priority"] = prefs_eff["priority"].astype(str).str.strip().str.upper()
 
-    # vacation をリクエストした (d,i) のみ年休可
+# --- Vacation（年休）を許可する (日, 人) の集合を作る ---
+# ルール: A/B/C で "vacation" を希望した本人・その日だけ VAC 割当を許可
     allow_vac = set()
-    for _, r in prefs_eff.iterrows():
-        if r["date"] in all_days and r["name"] in name_to_idx:
-            if str(r["kind"]).strip().lower() == "vacation":
-                d = all_days.index(r["date"])
-                i = name_to_idx[r["name"]]
+    for _, row in prefs_eff.iterrows():
+        try:
+            kind = str(row["kind"]).strip().lower()
+            pr   = str(row["priority"]).strip().upper()
+            dte  = row["date"]
+            nm   = row["name"]
+        except Exception:
+                continue
+        if kind == "vacation" and pr in ("A", "B", "C"):  # ★ A も含めるのが重要
+            if dte in all_days and nm in name_to_idx:
+                d = all_days.index(dte)
+                i = name_to_idx[nm]
                 allow_vac.add((d, i))
+
+    # 許可されていない (d, i) は VAC を 0 に固定
+    for d in range(D):
+        for i in range(N):
+            if (d, i) not in allow_vac:
+                model.Add(x[(d, VAC_IDX, i)] == 0)  
+
+        # --- Vacation（年休）を許可する (日, 人) の集合を作る ---
+    # ルール: B/C で "vacation" を希望した本人・その日だけ割り当て可
+    allow_vac: set[tuple[int, int]] = set()
+    for _, row in prefs_eff.iterrows():
+        try:
+            kind = str(row["kind"]).strip().lower()
+            pr   = str(row["priority"]).strip().upper()
+            dte  = row["date"]
+            nm   = row["name"]
+        except Exception:
+            continue
+
+        if kind == "vacation" and pr in ("B", "C"):
+            if dte in all_days and nm in name_to_idx:
+                d = all_days.index(dte)
+                i = name_to_idx[nm]
+                allow_vac.add((d, i))
+
+
 
     pref_soft = []
     A_star = set()
