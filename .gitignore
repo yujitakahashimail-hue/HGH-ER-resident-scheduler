@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.DS_Store
+
+# venv
+.venv/
+venv/
+
+# Streamlit キャッシュ・ログ
+.streamlit/cache/
+.streamlit/logs/
+
+# ローカル保存のスナップショット
+.streamlit_last_snapshot.json
+
+# OS
+.DS_Store
